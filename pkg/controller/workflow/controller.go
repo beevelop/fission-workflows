@@ -10,14 +10,16 @@ import (
 	"github.com/fission/fission-workflows/pkg/fes"
 	"github.com/fission/fission-workflows/pkg/types"
 	"github.com/fission/fission-workflows/pkg/types/aggregates"
+	"github.com/fission/fission-workflows/pkg/util/gopool"
 	"github.com/fission/fission-workflows/pkg/util/labels"
 	"github.com/fission/fission-workflows/pkg/util/pubsub"
 	"github.com/sirupsen/logrus"
 )
 
 const (
-	NotificationBuffer = 100
-	evalQueueSize      = 50
+	NotificationBuffer    = 100
+	evalQueueSize         = 50
+	maxParallelExecutions = 100
 )
 
 var wfLog = logrus.WithField("component", "controller.wf")
@@ -30,16 +32,16 @@ type Controller struct {
 	sub        *pubsub.Subscription
 	cancelFn   context.CancelFunc
 	evalQueue  chan string
-	evalCache  *controller.EvalCache
+	evalStates controller.EvalStore
 	evalPolicy controller.Rule
 }
 
 func NewController(wfCache fes.CacheReader, wfAPI *api.Workflow) *Controller {
 	ctr := &Controller{
-		wfCache:   wfCache,
-		api:       wfAPI,
-		evalQueue: make(chan string, evalQueueSize),
-		evalCache: controller.NewEvalCache(),
+		wfCache:    wfCache,
+		api:        wfAPI,
+		evalQueue:  make(chan string, evalQueueSize),
+		evalStates: controller.EvalStore{},
 	}
 	ctr.evalPolicy = defaultPolicy(ctr)
 	return ctr
@@ -72,11 +74,14 @@ func (c *Controller) Init(sctx context.Context) error {
 	}
 
 	// process evaluation queue
+	pool := gopool.New(maxParallelExecutions)
 	go func(ctx context.Context) {
 		for {
 			select {
 			case eval := <-c.evalQueue:
-				go c.Evaluate(eval) // TODO limit number of goroutines
+				pool.Submit(ctx, func() {
+					c.Evaluate(eval)
+				})
 			case <-ctx.Done():
 				return
 			}
@@ -98,7 +103,7 @@ func (c *Controller) handleMsg(msg pubsub.Msg) error {
 }
 
 func (c *Controller) Tick(tick uint64) error {
-	// Assume that all workflows are in evalCache
+	// Assume that all workflows are in evalStates
 	//now := time.Now()
 	// TODO short loop: eval cache
 	// TODO longer loop: cache
@@ -136,7 +141,7 @@ func (c *Controller) Notify(msg *fes.Notification) error {
 
 func (c *Controller) Evaluate(workflowID string) {
 	// Fetch and attempt to claim the evaluation
-	evalState := c.evalCache.GetOrCreate(workflowID)
+	evalState := c.evalStates.LoadOrStore(workflowID)
 	select {
 	case <-evalState.Lock():
 		defer evalState.Free()
@@ -207,7 +212,7 @@ func defaultPolicy(ctr *Controller) controller.Rule {
 		Rules: []controller.Rule{
 			&RuleSkipIfReady{},
 			&RuleRemoveIfDeleted{
-				evalCache: ctr.evalCache,
+				evalCache: ctr.evalStates,
 			},
 			&RuleEnsureParsed{
 				WfAPI: ctr.api,

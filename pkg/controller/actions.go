@@ -6,7 +6,7 @@ import (
 	"github.com/fission/fission-workflows/pkg/fes"
 )
 
-// TODO remove from EvalCache actions
+// TODO remove from EvalStore actions
 
 type ActionWait struct {
 	EvalState *EvalState
@@ -33,13 +33,13 @@ func (a *ActionSkip) Eval(rule EvalContext) Action {
 }
 
 type ActionRemoveFromEvalCache struct {
-	EvalCache *EvalCache
+	EvalCache EvalStore
 	ID        string
 }
 
 func (a *ActionRemoveFromEvalCache) Apply() error {
-	log.Infof("Removing '%s' from EvalCache", a.ID)
-	a.EvalCache.Del(a.ID)
+	log.Infof("Removing '%s' from EvalStore", a.ID)
+	a.EvalCache.Delete(a.ID)
 	return nil
 }
 
