@@ -6,14 +6,14 @@ EXAMPLE_DIR=$(dirname $0)/../../../examples/misc
 
 cleanup() {
     fission fn delete --name dump
-    fission fn delete --name fissioninputs
+    fission fn delete --name fission-inputs
 }
 trap cleanup EXIT
-fission fn create --name dump --env workflow --src ${EXAMPLE_DIR}/dump.sh
+fission fn create --name dump --env binary --src ${EXAMPLE_DIR}/dump.sh
 sleep 5
-fission fn create --name fissioninputs --env workflow --src ${EXAMPLE_DIR}/fissioninputs.wf.yaml
+fission fn create --name fission-inputs --env workflow --src ${EXAMPLE_DIR}/fission-inputs.wf.yaml
 sleep 5 # TODO remove this once we can initiate synchronous commands
-fission fn test --name fissioninputs -b 'foobar' -H 'HEADER_KEY: HEADER_VAL' --method PUT \
+fission fn test --name fission-inputs -b 'foobar' -H 'HEADER_KEY: HEADER_VAL' --method PUT \
     | tee /dev/tty \
     | grep -i Header_Val \
     | grep HEADER_VAL \
